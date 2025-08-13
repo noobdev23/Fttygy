@@ -1,0 +1,256 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Eye Scanner</title>
+<style>
+  :root{
+    --bg:#0f1724;
+    --card:#071733;
+    --accent:#3ddc97;
+    --muted:#9fb4c8;
+    --danger:#ff4d6d;
+  }
+  html,body{
+    margin:0;
+    padding:0;
+    height:100%;
+    background:var(--bg);
+    font-family:Arial, Helvetica, sans-serif;
+    color:#eaf6ff;
+  }
+  .boot-screen{
+    position:fixed;
+    top:0;left:0;width:100%;height:100%;
+    background:radial-gradient(circle,#000 0%,#071026 100%);
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    font-size:18px;
+    z-index:1000;
+    animation:fadeOut 0.8s ease forwards;
+    animation-delay:3s;
+  }
+  @keyframes fadeOut{
+    to{opacity:0;visibility:hidden;}
+  }
+  .boot-logo{
+    font-size:28px;
+    color:var(--accent);
+    margin-bottom:20px;
+    text-shadow:0 0 8px var(--accent);
+  }
+  .loading-bar{
+    width:200px;
+    height:8px;
+    background:rgba(255,255,255,0.1);
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .loading-fill{
+    height:100%;
+    width:0%;
+    background:var(--accent);
+    animation:loadFill 3s linear forwards;
+  }
+  @keyframes loadFill{
+    to{width:100%;}
+  }
+  .wrap{
+    display:none;
+    max-width:900px;
+    margin:0 auto;
+    padding:20px;
+  }
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  header h1{
+    font-size:20px;
+    margin:0;
+  }
+  .scanner{
+    margin-top:20px;
+    display:flex;
+    gap:20px;
+    flex-wrap:wrap;
+    justify-content:center;
+  }
+  video{
+    border:2px solid var(--accent);
+    border-radius:8px;
+    width:300px;
+    height:220px;
+    object-fit:cover;
+    background:black;
+  }
+  .controls{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    justify-content:center;
+  }
+  .controls button{
+    background:var(--card);
+    color:#fff;
+    border:none;
+    padding:10px 16px;
+    font-size:14px;
+    border-radius:6px;
+    cursor:pointer;
+    transition:0.3s;
+  }
+  .controls button:hover{
+    background:var(--accent);
+    color:#000;
+  }
+  .score{
+    margin-top:20px;
+    font-size:22px;
+    font-weight:bold;
+    text-align:center;
+    color:var(--accent);
+  }
+  .report{
+    margin-top:10px;
+    background:var(--card);
+    padding:10px;
+    border-radius:8px;
+    font-size:14px;
+    white-space:pre-line;
+    min-height:60px;
+  }
+  .footer{
+    margin-top:30px;
+    background:#0002;
+    padding:10px;
+    font-size:13px;
+    color:var(--muted);
+    overflow:hidden;
+    position:relative;
+  }
+  .ticker{
+    display:inline-block;
+    white-space:nowrap;
+    animation:scroll 15s linear infinite;
+  }
+  @keyframes scroll{
+    from{transform:translateX(100%);}
+    to{transform:translateX(-100%);}
+  }
+</style>
+</head>
+<body>
+<div class="boot-screen">
+  <div class="boot-logo">⚡ AI Vision System v3.2</div>
+  <div>System Initializing...</div>
+  <div class="loading-bar"><div class="loading-fill"></div></div>
+</div>
+
+<div class="wrap">
+  <header>
+    <h1>AI Eye Scanner</h1>
+  </header>
+
+  <div class="scanner">
+    <video id="video" autoplay playsinline></video>
+    <div class="controls">
+      <button onclick="startScan()">Start Scan</button>
+      <button onclick="stopScan()">Stop</button>
+      <button onclick="resetScan()">Reset</button>
+      <button onclick="showTips()">Tips</button>
+      <button onclick="showAbout()">About</button>
+    </div>
+  </div>
+
+  <div class="score" id="score"></div>
+  <div class="report" id="report"></div>
+
+  <div class="footer">
+    <div class="ticker" id="ticker">Tip: Keep your eyes steady for accurate results • Tip: Ensure good lighting • Tip: Remove glasses for better detection • Tip: Sit about 50cm from the camera</div>
+  </div>
+</div>
+
+<script>
+let video = document.getElementById('video');
+let scoreEl = document.getElementById('score');
+let reportEl = document.getElementById('report');
+let stream;
+
+window.addEventListener('load', ()=>{
+  setTimeout(()=>{
+    document.querySelector('.wrap').style.display='block';
+  },3000);
+});
+
+async function startCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:true});
+    video.srcObject = stream;
+  }catch(err){
+    alert('Camera access denied or not available.');
+  }
+}
+
+function stopCamera(){
+  if(stream){
+    stream.getTracks().forEach(track=>track.stop());
+  }
+}
+
+function startScan(){
+  startCamera();
+  scoreEl.textContent = "Scanning...";
+  reportEl.textContent = "";
+  setTimeout(()=>{
+    let score = Math.floor(Math.random()*31)+70;
+    scoreEl.textContent = "Eye Score: "+score;
+    playBeep(score);
+    reportEl.textContent = generateReport(score);
+  },3000);
+}
+
+function stopScan(){
+  stopCamera();
+  scoreEl.textContent = "Scan Stopped";
+}
+
+function resetScan(){
+  scoreEl.textContent = "";
+  reportEl.textContent = "";
+  stopCamera();
+}
+
+function generateReport(score){
+  let focus = score>90?"Excellent":score>80?"Good":"Moderate";
+  let blink = score>90?"Optimal":score>80?"Slightly High":"High";
+  let fatigue = score>90?"Very Low":score>80?"Low":"Medium";
+  return `Focus Stability: ${focus}\nBlink Rate: ${blink}\nEye Fatigue Level: ${fatigue}`;
+}
+
+function playBeep(score){
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(200 + (score-70)*5, ctx.currentTime);
+  osc.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.2);
+}
+
+function showTips(){
+  alert("Tips:\n1. Keep eyes steady\n2. Ensure good lighting\n3. Sit ~50cm away\n4. Remove glasses for better detection");
+}
+
+function showAbout(){
+  alert("AI Eye Scanner v3.2\nFun simulation — not medical advice.");
+}
+
+</script>
+</body>
+</html>
