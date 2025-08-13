@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AI Eye Scanner — With Live Eye Score (TF.js)</title>
+<style>
+  :root{--bg:#0f1724;--card:#0b1532;--accent:#31d0a0;--muted:#9fb4c8;--warn:#ffd166;--bad:#ff6b6b}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#eaf6ff;background:radial-gradient(1200px 900px at 10% 0%,#0a1430 0%,#081428 60%,#050b18 100%);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:18px auto;padding:18px}
+  header{display:flex;align-items:center;gap:12px}
+  header h1{margin:0;font-size:20px;letter-spacing:.2px}
+  .grid{display:grid;grid-template-columns:1fr 330px;gap:16px;margin-top:14px}
+  @media (max-width:980px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);padding:14px;border-radius:14px;box-shadow:0 10px 30px rgba(2,6,23,.6)}
+  .video-wrap{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(1.05) contrast(1.05)}
+  canvas#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  button{appearance:none;border:0;padding:10px 14px;border-radius:12px;background:linear-gradient(180deg,var(--accent),#1fbf97);color:#03151a;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(49,208,160,.35);transition:transform .06s ease,filter .2s ease}
+  button:hover{transform:translateY(-1px);filter:brightness(1.05)}
+  button.secondary{background:linear-gradient(180deg,#233555,#15233f);color:#d7e7ff;border:1px solid rgba(255,255,255,.12);box-shadow:none}
+  .status{font-size:13px;color:var(--muted);margin-top:8px}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(49,208,160,.12);color:#9ff1d8;border:1px solid rgba(49,208,160,.35);font-size:12px}
+  .kpi{display:grid;gap:10px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01));border:1px solid rgba(255,255,255,.08)}
+  .big{font-size:36px;font-weight:800;letter-spacing:.5px}
+  .meter{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#8ef3d0)}
+  .hint{font-size:12px;color:#b9cbe0;opacity:.9}
+  .ok{color:#a9f8d0}.warn{color:var(--warn)}.err{color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 8.5C4 7.12 5.12 6 6.5 6h11c1.38 0 2.5 1.12 2.5 2.5v7c0 1.38-1.12 2.5-2.5 2.5h-11C5.12 18 4 16.88 4 15.5v-7Z" stroke="#31d0a0" stroke-width="1.3"/>
+      <circle cx="12" cy="12" r="3.5" stroke="#31d0a0" stroke-width="1.3"/>
+    </svg>
+    <h1>AI Eye Scanner — Live Eye Score</h1>
+    <span class="badge" id="httpsBadge">Checking HTTPS…</span>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <div class="video-wrap">
+        <video id="video" playsinline autoplay muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="btnStart">Start Scan</button>
+        <button id="btnStop" class="secondary" disabled>Stop</button>
+        <button id="btnTorch" class="secondary" disabled>Toggle Torch</button>
+        <button id="btnFlip" class="secondary">Flip Camera</button>
+      </div>
+      <div class="status" id="status">Idle.</div>
+    </section>
+
+    <aside class="card">
+      <div class="kpi">
+        <div class="row"><span>Eye Score</span><span class="big" id="scoreText">0</span></div>
+        <div class="meter"><div class="fill" id="scoreBar"></div></div>
+        <div class="row"><span>Eye Openness</span><span id="openText">—</span></div>
+        <div class="meter"><div class="fill" id="openBar"></div></div>
+        <div class="row"><span>Blinks (session)</span><span id="blinkCount">0</span></div>
+        <div class="row"><span>Blinks / min</span><span id="blinkRate">0</span></div>
+        <div class="row"><span>Camera</span><span id="cam">—</span></div>
+        <div class="row"><span>Resolution</span><span id="res">—</span></div>
+        <div class="row"><span>Torch</span><span id="torchState">Not supported</span></div>
+        <div class="row"><span>Tips</span><span class="hint">Use bright, even lighting. Keep your face inside the frame.</span></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- TensorFlow.js + Face Landmarks (CDN ESM) -->
+<script type="module">
+  import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.esm.js';
+  import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.20.0/dist/tf-backend-webgl.esm.js';
+  import * as faceLandmarksDetection from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.3/dist/face-landmarks-detection.esm.js';
+
+  const els = {
+    video: document.getElementById('video'),
+    overlay: document.getElementById('overlay'),
+    status: document.getElementById('status'),
+    httpsBadge: document.getElementById('httpsBadge'),
+    btnStart: document.getElementById('btnStart'),
+    btnStop: document.getElementById('btnStop'),
+    btnTorch: document.getElementById('btnTorch'),
+    btnFlip: document.getElementById('btnFlip'),
+    cam: document.getElementById('cam'),
+    res: document.getElementById('res'),
+    torchState: document.getElementById('torchState'),
+    scoreText: document.getElementById('scoreText'),
+    scoreBar: document.getElementById('scoreBar'),
+    openText: document.getElementById('openText'),
+    openBar: document.getElementById('openBar'),
+    blinkCount: document.getElementById('blinkCount'),
+    blinkRate: document.getElementById('blinkRate'),
+  };
+
+  let stream = null, track = null, animId = null;
+  let currentFacing = 'user';
+  let model = null;
+  let blinkCounter = 0;
+  let blinkTimestamps = [];
+  let lastEyeClosed = false;
+  let imageCapture = null;
+
+  const isHttps = location.protocol === 'https:' || location.hostname === 'localhost';
+  els.httpsBadge.textContent = isHttps ? 'Secure: HTTPS' : 'Not secure: use HTTPS';
+  els.httpsBadge.style.background = isHttps ? 'rgba(49,208,160,.12)' : 'rgba(255,107,107,.12)';
+  els.httpsBadge.style.borderColor = isHttps ? 'rgba(49,208,160,.35)' : 'rgba(255,107,107,.35)';
+  els.httpsBadge.style.color = isHttps ? '#9ff1d8' : '#ff9f9f';
+
+  const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+  const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+
+  const IDX = {
+    LEFT:  { inner: 133, outer: 33,  top: 159, bottom:145 },
+    RIGHT: { inner: 362, outer: 263, top: 386, bottom:374 },
+  };
+
+  function dist2D(a,b){ const dx=a[0]-b[0], dy=a[1]-b[1]; return Math.hypot(dx,dy); }
+
+  function eyeOpenness(mesh, side){
+    const v = dist2D(mesh[IDX[side].top], mesh[IDX[side].bottom]);
+    const h = dist2D(mesh[IDX[side].inner], mesh[IDX[side].outer]);
+    if (!isFinite(v) || !isFinite(h) || h===0) return 0;
+    return v / h;
+  }
+
+  function updateBlinkStats(isClosed){
+    if (isClosed && !lastEyeClosed) {
+      blinkCounter++;
+      blinkTimestamps.push(performance.now());
+      const cutoff = performance.now() - 60000;
+      blinkTimestamps = blinkTimestamps.filter(t => t >= cutoff);
+      els.blinkCount.textContent = String(blinkCounter);
+      els.blinkRate.textContent = String(blinkTimestamps.length);
+    }
+    lastEyeClosed = isClosed;
+  }
+
+  function computeScore(avgOpen, blinksPerMin){
+    const openPart = clamp((avgOpen - 0.15) / (0.35 - 0.15), 0, 1) * 70;
+    const diff = Math.abs((blinksPerMin||0) - 15);
+    const blinkPart = clamp(1 - diff/15, 0, 1) * 30;
+    return Math.round(clamp(openPart + blinkPart, 0, 100));
+  }
+
+  async function loadModel(){
+    els.status.textContent = 'Loading eye model…';
+    await tf.setBackend('webgl');
+    await tf.ready();
+    model = await faceLandmarksDetection.load(
+      faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
+      { runtime: 'tfjs', refineLandmarks: true }
+    );
+  }
+
+  async function startCamera(){
+    const constraints = {
+      audio:false,
+      video:{
+        facingMode:{ ideal: currentFacing },
+        width:{ ideal: 1280 },
+        height:{ ideal: 720 }
+      }
+    };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    els.video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+    imageCapture = ('ImageCapture' in window) ? new ImageCapture(track) : null;
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    const s = track.getSettings ? track.getSettings() : {};
+    els.cam.textContent = track.label || 'Camera';
+    els.res.textContent = (s.width && s.height) ? `${s.width}×${s.height}` : '—';
+    els.torchState.textContent = caps.torch ? 'Available' : 'Not supported';
+    els.btnTorch.disabled = !caps.torch;
+    await els.video.play().catch(()=>{});
+  }
+
+  function setupCanvas(){
+    const v = els.video, c = els.overlay;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = v.clientWidth, h = v.clientHeight;
+    c.width = Math.floor(w * dpr);
+    c.height = Math.floor(h * dpr);
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawFrame(ctx,w,h){
+    ctx.clearRect(0,0,w,h);
+    const g = ctx.createRadialGradient(w/2,h/2,Math.min(w,h)/4,w/2,h/2,Math.max(w,h));
+    g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.35)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    const L = Math.min(w,h)*.11, pad = Math.min(w,h)*.08;
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(49,208,160,.95)';
+    const corners=[[pad,pad,pad+L,pad],[pad,pad,pad,pad+L],[w-pad,pad,w-pad-L,pad],[w-pad,pad,w-pad,pad+L],
+                   [pad,h-pad,pad+L,h-pad],[pad,h-pad,pad,h-pad-L],[w-pad,h-pad,w-pad-L,h-pad],[w-pad,h-pad,w-pad,h-pad-L]];
+    ctx.beginPath(); for(const [x1,y1,x2,y2] of corners){ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);} ctx.stroke();
+  }
+
+  function drawScanLine(ctx,w,h,t){
+    const y = (Math.sin(t*0.8)*0.5+0.5) * (h-40)+20;
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const g = ctx.createLinearGradient(0,y-20,0,y+20);
+    g.addColorStop(0,'rgba(49,208,160,0)'); g.addColorStop(.5,'rgba(49,208,160,.45)'); g.addColorStop(1,'rgba(49,208,160,0)');
+    ctx.fillStyle=g; ctx.fillRect(20,y-20,w-40,40); ctx.restore();
+  }
+
+  function drawEyeLandmarks(ctx, mesh){
+    ctx.save();
+    ctx.fillStyle='rgba(49,208,160,.85)';
+    const pts = [IDX.LEFT.inner, IDX.LEFT.outer, IDX.LEFT.top, IDX.LEFT.bottom, IDX.RIGHT.inner, IDX.RIGHT.outer, IDX.RIGHT.top, IDX.RIGHT.bottom];
+    for (const i of pts){
+      const p = mesh[i]; if(!p) continue;
+      ctx.beginPath(); ctx.arc(p[0], p[1], 2.5, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function updateMeters(score, openness, blinkPerMin){
+    els.scoreText.textContent = String(score);
+    els.scoreBar.style.width = `${score}%`;
+    const openPct = clamp((openness - 0.15)/(0.35-0.15),0,1)*100;
+    els.openText.textContent = openness ? openness.toFixed(3) : '—';
+    els.openBar.style.width = `${openPct}%`;
+    els.scoreBar.style.background = score >= 75 ? 'linear-gradient(90deg,#31d0a0,#8ef3d0)'
+      : score >= 50 ? 'linear-gradient(90deg,#ffd166,#ffe6a6)'
+      : 'linear-gradient(90deg,#ff6b6b,#ff9f9f)';
+  }
+
+  async function runLoop(){
+    const ctx = els.overlay.getContext('2d');
+    const w = els.overlay.clientWidth, h = els.overlay.clientHeight;
+    let t = 0;
+
+    const loop = async ()=>{
+      t += 1/60;
+      drawFrame(ctx, w, h);
+      drawScanLine(ctx, w, h, t);
+
+      let faces = [];
+      try {
+        faces = await model.estimateFaces({ input: els.video, predictIrises: true, flipHorizontal: (currentFacing==='user') });
+      } catch (e) {
+      }
+
+      if (faces.length > 0 && faces[0].scaledMesh){
+        const mesh = faces[0].scaledMesh;
+        // drawEyeLandmarks(ctx, mesh); // draw optional small dots
+        const left = eyeOpenness(mesh,'LEFT');
+        const right = eyeOpenness(mesh,'RIGHT');
+        const avgOpen = (left + right) / 2;
+        const closed = avgOpen < 0.20;
+        updateBlinkStats(closed);
+        const blinksPerMin = blinkTimestamps.length;
+        const score = computeScore(avgOpen, blinksPerMin);
+        updateMeters(score, avgOpen, blinksPerMin);
+        els.status.textContent = `Scanning… eyes tracked. Openness L:${left.toFixed(3)} R:${right.toFixed(3)}`;
+      } else {
+        els.status.textContent = 'Scanning… face not found. Center your face and open eyes.';
+      }
+
+      animId = requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  async function startScan(){
+    try{
+      els.status.textContent = 'Initializing…';
+      els.btnStart.disabled = true; els.btnStop.disabled = false;
+      if (!model) await loadModel();
+      await startCamera();
+      setupCanvas();
+      blinkCounter = 0; blinkTimestamps.length = 0; els.blinkCount.textContent = '0'; els.blinkRate.textContent = '0';
+      await sleep(100);
+      runLoop();
+    }catch(err){
+      console.error(err);
+      els.status.innerHTML = `<span class="err">${err.name||'Error'}:</span> ${err.message||err}`;
+      els.btnStart.disabled = false; els.btnStop.disabled = true;
+    }
+  }
+
+  function stopScan(){
+    if (animId) cancelAnimationFrame(animId), animId = null;
+    if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; track=null; imageCapture=null; }
+    const ctx = els.overlay.getContext('2d'); ctx && ctx.clearRect(0,0,els.overlay.width,els.overlay.height);
+    els.btnStart.disabled = false; els.btnStop.disabled = true;
+    els.status.textContent = 'Idle.';
+  }
+
+  async function toggleTorch(){
+    try{
+      if (!track) return;
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if (!caps.torch) return;
+      const s = track.getSettings();
+      const cur = s.torch === true;
+      await track.applyConstraints({ advanced: [{ torch: !cur }] });
+      els.torchState.textContent = !cur ? 'Torch: ON' : 'Torch: OFF';
+    }catch(e){
+      els.status.innerHTML = `<span class="err">Torch error:</span> ${e.message||e}`;
+    }
+  }
+
+  async function flipCamera(){
+    currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+    stopScan();
+    await startScan();
+  }
+
+  els.btnStart.addEventListener('click', startScan);
+  els.btnStop.addEventListener('click', stopScan);
+  els.btnTorch.addEventListener('click', toggleTorch);
+  els.btnFlip.addEventListener('click', flipCamera);
+
+  window.addEventListener('resize', ()=>{ if(els.video.srcObject){ setupCanvas(); } });
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) stopScan(); });
+
+</script>
+</body>
+</html>
